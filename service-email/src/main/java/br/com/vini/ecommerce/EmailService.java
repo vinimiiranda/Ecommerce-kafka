@@ -2,35 +2,37 @@ package br.com.vini.ecommerce;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
-public class FraudDetectorService {
+import java.util.HashMap;
 
-    public static void main(String[] args) throws Exception {
-        var fraudService = new FraudDetectorService();
-        try (var service = new KafkaService<Order>(FraudDetectorService.class.getSimpleName(),
-                "ECOMMERCE_NEW_ORDER",
-                fraudService::parse)){
+public class EmailService {
+
+    public static void main(String[] args) {
+        var emailService = new EmailService();
+        var service = new KafkaService(EmailService.class.getSimpleName(),
+                "ECOMMERCE_SEND_EMAIL",
+                emailService::parse,
+                String.class,
+                new HashMap<String, String>());
         service.run();
     }
-}
 
     private void parse(ConsumerRecord<String, String> record) {
         System.out.println("-------------------------------------------");
-        System.out.println("Processing new order, checking for fraud");
+        System.out.println("Send email!");
         System.out.println(record.key());
         System.out.println(record.value());
         System.out.println(record.partition());
         System.out.println(record.offset());
         try {
-            Thread.sleep(5000);
+            Thread.sleep(1000);
         } catch (InterruptedException e) {
             // ignoring
             throw new RuntimeException(e);
         }
-        System.out.println("Order processed");
+        System.out.println("Email send!");
     }
 
 
 }
-
 
 
