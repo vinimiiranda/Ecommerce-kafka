@@ -15,6 +15,7 @@
         <module>log-service</module>
         <module>service-email</module>
         <module>service-new-order</module>
+        <module>service-users</module>
     </modules>
 
 

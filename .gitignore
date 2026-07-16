@@ -41,3 +41,7 @@ build/
 .idea/
 target/
 *.iml
+out/
+*.class
+*.db
+users_database.db
