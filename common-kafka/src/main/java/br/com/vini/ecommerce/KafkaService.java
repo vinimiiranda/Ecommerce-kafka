@@ -4,6 +4,7 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 
+import java.sql.SQLException;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Map;
@@ -47,6 +48,8 @@ public class KafkaService<T> implements Cloneable, AutoCloseable {
                         e.printStackTrace();
                     } catch (InterruptedException e) {
                        e.printStackTrace();
+                    } catch (SQLException e) {
+                        e.printStackTrace();
                     }
                 }
             }
