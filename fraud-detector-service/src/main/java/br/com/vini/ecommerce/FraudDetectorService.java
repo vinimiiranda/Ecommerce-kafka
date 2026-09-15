@@ -3,8 +3,8 @@ package br.com.vini.ecommerce;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 import java.math.BigDecimal;
-import java.util.HashMap;
-import java.util.Map;import java.util.concurrent.ExecutionException;
+import java.util.Map;
+import java.util.concurrent.ExecutionException;
 
 public class FraudDetectorService {
 
@@ -38,10 +38,10 @@ public class FraudDetectorService {
         if (isFraud(order)) {
             // pretending that the fraud happens when the amount is >= 4500
             System.out.println("Order is a fraud!!!");
-            orderDispatcher.send("ECOMMERCE_ORDER_REJECTED", order.getUserId(), order);
+            orderDispatcher.send("ECOMMERCE_ORDER_REJECTED", order.getEmail(), order);
         } else {
             System.out.println("Approved: " + order);
-            orderDispatcher.send("ECOMMERCE_ORDER_APPROVED", order.getUserId(), order);
+            orderDispatcher.send("ECOMMERCE_ORDER_APPROVED", order.getEmail(), order);
         }
 
 

@@ -6,7 +6,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
+import java.util.UUID;
 
 public class CreateUserService {
 
@@ -47,14 +47,14 @@ public class CreateUserService {
     private void insertNewUser(String email) throws SQLException {
         var insert = connection.prepareStatement("insert into Users (uuid, email)" +
                 "values (?,?)");
-        insert.setString(1, "uuid");
+        insert.setString(1, UUID.randomUUID().toString());
         insert.setString(2, email);
         insert.execute();
         System.out.println("Usúario uuid " + email + "adicionado com sucesso");
     }
 
     private boolean isNewUser(String email) throws SQLException {
-        var exists = connection.prepareStatement("select uuid from Users" +
+        var exists = connection.prepareStatement("select uuid from Users " +
                 "where email = ? limit 1 ");
         exists.setString(1, email);
         var results = exists.executeQuery();
