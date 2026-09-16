@@ -80,8 +80,8 @@ git clone https://github.com/vinimiiranda/Ecommerce-kafka.git
 cd Ecommerce-kafka
 mvn clean install
 
-# 2. Subir o Kafka (exemplo com Docker)
-docker run -d --name kafka -p 9092:9092 apache/kafka:latest
+# 2. Subir o broker Kafka (docker-compose.yml na raiz do projeto)
+docker compose up -d
 
 # 3. Iniciar os consumidores (cada um em um terminal)
 mvn -pl fraud-detector-service exec:java -Dexec.mainClass=br.com.vini.ecommerce.FraudDetectorService
