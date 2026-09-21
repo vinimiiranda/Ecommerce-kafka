@@ -1,17 +1,24 @@
+### Maven ###
 target/
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
-.kotlin
+
+### Build antigo do IntelliJ (fora do Maven) ###
+# Contem classes velhas de antes da divisao em modulos; nao deve ser usado no classpath.
+out/
+production/
+*.class
+
+### Dados locais ###
+*.db
 
 ### IntelliJ IDEA ###
-.idea/modules.xml
-.idea/jarRepositories.xml
-.idea/compiler.xml
-.idea/libraries/
+.idea/
 *.iws
 *.iml
 *.ipr
+.kotlin
 
 ### Eclipse ###
 .apt_generated
@@ -37,11 +44,3 @@ build/
 
 ### Mac OS ###
 .DS_Store
-
-.idea/
-target/
-*.iml
-out/
-*.class
-*.db
-users_database.db
