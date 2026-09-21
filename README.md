@@ -72,7 +72,7 @@ APPROVED      REJECTED
 
 ## ▶️ Como executar
 
-**Pré-requisitos:** Java 21+, Maven e um broker Kafka rodando em `localhost:9092`.
+**Pré-requisitos:** Java 21+, Maven e Docker (para o cluster Kafka de 2 brokers, em `localhost:19092` e `localhost:29092`).
 
 ```bash
 # 1. Clonar e compilar
@@ -80,7 +80,7 @@ git clone https://github.com/vinimiiranda/Ecommerce-kafka.git
 cd Ecommerce-kafka
 mvn clean install
 
-# 2. Subir o broker Kafka (docker-compose.yml na raiz do projeto)
+# 2. Subir o cluster Kafka (docker-compose.yml na raiz do projeto)
 docker compose up -d
 
 # 3. Iniciar os consumidores (cada um em um terminal)
@@ -94,6 +94,31 @@ mvn -pl service-new-order exec:java -Dexec.mainClass=br.com.vini.ecommerce.NewOr
 ```
 
 Os consumidores imprimem no console os eventos recebidos, com tópico, chave, partição e offset.
+
+---
+
+## 🛡️ Alta disponibilidade (2 brokers)
+
+O `docker-compose.yml` sobe um cluster Kafka em modo KRaft com:
+
+| Container | Papel | Porta no host |
+|---|---|---|
+| `ecommerce-kafka-1` | broker + controller | `19092` |
+| `ecommerce-kafka-2` | broker + controller | `29092` |
+| `ecommerce-kafka-3` | controller dedicado (desempata o quórum) | — |
+
+- Todo tópico tem **2 réplicas** (uma em cada broker) e `min.insync.replicas=1`: se um broker cair, o outro assume a liderança das partições e produtores e consumidores continuam funcionando.
+- O 3º nó existe porque o quórum do KRaft precisa de maioria: com só 2 votantes, a queda de um deles impediria a eleição de novos líderes.
+- Os clientes (`KafkaDispatcher` e `KafkaService`) conectam usando os dois brokers. Para usar outro endereço, defina a variável de ambiente `KAFKA_BOOTSTRAP_SERVERS`.
+- Os tópicos do projeto são criados pelo container `ecommerce-kafka-init` com 3 partições e 2 réplicas.
+
+Para testar o failover:
+
+```bash
+docker kill ecommerce-kafka-1     # derruba um broker
+# ...envie pedidos: continuam sendo produzidos e consumidos...
+docker start ecommerce-kafka-1    # ao voltar, ele ressincroniza sozinho
+```
 
 ---
 

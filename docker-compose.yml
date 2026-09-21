@@ -1,28 +1,112 @@
-# Sobe um broker Kafka em modo KRaft (sem Zookeeper) para rodar os servicos.
+# Cluster Kafka em modo KRaft (sem Zookeeper) com 2 brokers para alta disponibilidade.
 # Uso: docker compose up -d
+#
+# Topologia:
+#   kafka-1  broker + controller  -> host localhost:19092
+#   kafka-2  broker + controller  -> host localhost:29092
+#   kafka-3  controller dedicado  -> desempata o quorum do KRaft
+#
+# Por que 3 nos e nao 2: o quorum KRaft precisa de maioria. Com apenas 2 votantes, a
+# queda de um deles impede eleger novos lideres de particao e o failover nao acontece.
+# Com 3 votantes o cluster tolera a queda de qualquer um dos containers.
+#
+# Replicacao: todo topico tem 2 replicas (uma em cada broker) e min.insync.replicas=1,
+# entao a escrita continua funcionando com um broker fora do ar.
+
+x-kafka-common: &kafka-common
+  image: apache/kafka:3.9.0
+  restart: unless-stopped
+  environment: &kafka-common-env
+    CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qg"
+    KAFKA_LOG_DIRS: /var/lib/kafka/data
+    KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+    KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+    KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+    KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+    KAFKA_DEFAULT_REPLICATION_FACTOR: 2
+    KAFKA_MIN_INSYNC_REPLICAS: 1
+    KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
+    KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 2
+    KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
 
 services:
-  kafka:
-    image: apache/kafka:3.9.0
-    container_name: ecommerce-kafka
+  kafka-1:
+    <<: *kafka-common
+    container_name: ecommerce-kafka-1
+    hostname: kafka-1
     ports:
-      - "9092:9092"
+      - "19092:19092"
     environment:
+      <<: *kafka-common-env
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:19092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-1:9092,EXTERNAL://localhost:19092
     volumes:
-      - kafka-data:/tmp/kraft-combined-logs
+      - kafka-1-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  kafka-2:
+    <<: *kafka-common
+    container_name: ecommerce-kafka-2
+    hostname: kafka-2
+    ports:
+      - "29092:29092"
+    environment:
+      <<: *kafka-common-env
+      KAFKA_NODE_ID: 2
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-2:9092,EXTERNAL://localhost:29092
+    volumes:
+      - kafka-2-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  kafka-3:
+    <<: *kafka-common
+    container_name: ecommerce-kafka-3
+    hostname: kafka-3
+    environment:
+      <<: *kafka-common-env
+      KAFKA_NODE_ID: 3
+      KAFKA_PROCESS_ROLES: controller
+      KAFKA_LISTENERS: CONTROLLER://:9093
+    volumes:
+      - kafka-3-data:/var/lib/kafka/data
+
+  # Cria os topicos do projeto com 2 replicas assim que os dois brokers estao de pe.
+  # Como o auto-create exige os 2 brokers vivos, criar antes evita erro se um cair depois.
+  kafka-init:
+    image: apache/kafka:3.9.0
+    container_name: ecommerce-kafka-init
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        for topic in ECOMMERCE_NEW_ORDER ECOMMERCE_SEND_EMAIL ECOMMERCE_ORDER_APPROVED ECOMMERCE_ORDER_REJECTED; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092,kafka-2:9092 \
+            --create --if-not-exists --topic $$topic --partitions 3 --replication-factor 2
+        done
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092,kafka-2:9092 --list
 
 volumes:
-  kafka-data:
+  kafka-1-data:
+  kafka-2-data:
+  kafka-3-data:
