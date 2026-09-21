@@ -35,7 +35,7 @@ public class NewOrderServelet extends HttpServlet {
             var orderId = UUID.randomUUID().toString();
             var amount = new BigDecimal(req.getParameter("amount"));
 
-            var order= new Order(orderId, amount, email);
+            var order = new Order(orderId, amount, email);
             orderDispatcher.send("ECOMMERCE_NEW_ORDER", email, order);
 
             var emailCode = "Thank you for order! We are processing your order!";
