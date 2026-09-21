@@ -16,7 +16,7 @@ public class CreateUserService {
     CreateUserService() throws SQLException {
         String url = "jdbc:sqlite:users_database.db";
         connection = DriverManager.getConnection(url);
-        connection.createStatement().execute("create table Users(" +
+        connection.createStatement().execute("create table if not exists Users(" +
                 "uuid varchar(200) primary key," +
                 "email varchar(200))");
     }
