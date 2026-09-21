@@ -40,7 +40,8 @@ class KafkaDispatcher<T> implements Cloneable, AutoCloseable {
     }
 
     @Override
-    public void close() throws Exception {
+    public void close() {
+        producer.close();
     }
 }
 
