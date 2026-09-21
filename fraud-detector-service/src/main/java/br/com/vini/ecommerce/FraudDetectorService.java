@@ -6,20 +6,23 @@ import java.math.BigDecimal;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 
-public class FraudDetectorService {
+public class FraudDetectorService implements AutoCloseable {
 
-    public static void main(String[] args) throws Exception {
-        var fraudService = new FraudDetectorService();
-        try (var service = new KafkaService<>(FraudDetectorService.class.getSimpleName(),
-                "ECOMMERCE_NEW_ORDER",
-                fraudService::parse,
-                Order.class,
-                Map.of())) {
+    /** Pedidos com valor maior ou igual a este sao considerados fraude. */
+    private static final BigDecimal FRAUD_THRESHOLD = new BigDecimal("4500");
+
+    public static void main(String[] args) {
+        try (var fraudService = new FraudDetectorService();
+             var service = new KafkaService<>(FraudDetectorService.class.getSimpleName(),
+                     "ECOMMERCE_NEW_ORDER",
+                     fraudService::parse,
+                     Order.class,
+                     Map.of())) {
             service.run();
         }
     }
 
-    private final KafkaDispatcher<Order> orderDispatcher = new KafkaDispatcher<Order>();
+    private final KafkaDispatcher<Order> orderDispatcher = new KafkaDispatcher<>();
 
     private void parse(ConsumerRecord<String, Order> record) throws ExecutionException, InterruptedException {
         System.out.println("-------------------------------------------");
@@ -28,15 +31,10 @@ public class FraudDetectorService {
         System.out.println(record.value());
         System.out.println(record.partition());
         System.out.println(record.offset());
-        try {
-            Thread.sleep(5000);
-        } catch (InterruptedException e) {
-            // ignoring
-            e.printStackTrace();
-        }
+        // simula o tempo de uma analise de fraude
+        Thread.sleep(5000);
         var order = record.value();
         if (isFraud(order)) {
-            // pretending that the fraud happens when the amount is >= 4500
             System.out.println("Order is a fraud!!!");
             orderDispatcher.send("ECOMMERCE_ORDER_REJECTED", order.getEmail(), order);
         } else {
@@ -44,14 +42,15 @@ public class FraudDetectorService {
             orderDispatcher.send("ECOMMERCE_ORDER_APPROVED", order.getEmail(), order);
         }
 
-
         System.out.println("Order processed");
     }
 
-    private boolean isFraud(Order order) {
-        return order.getAmount().compareTo(new BigDecimal("4500")) >= 0;
+    static boolean isFraud(Order order) {
+        return order.getAmount().compareTo(FRAUD_THRESHOLD) >= 0;
+    }
+
+    @Override
+    public void close() {
+        orderDispatcher.close();
     }
 }
-
-
-

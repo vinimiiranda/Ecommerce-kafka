@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import org.apache.kafka.common.serialization.Deserializer;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 public class GsonDeserializer<T> implements Deserializer<T> {
@@ -14,6 +15,7 @@ public class GsonDeserializer<T> implements Deserializer<T> {
     private Class<T> type;
 
     @Override
+    @SuppressWarnings("unchecked")
     public void configure(Map<String, ?> configs, boolean isKey) {
         String typeName = String.valueOf(configs.get(TYPE_CONFIG));
         try {
@@ -25,6 +27,9 @@ public class GsonDeserializer<T> implements Deserializer<T> {
 
     @Override
     public T deserialize(String topic, byte[] bytes) {
-        return gson.fromJson(new String(bytes), type);
+        if (bytes == null) {
+            return null;
+        }
+        return gson.fromJson(new String(bytes, StandardCharsets.UTF_8), type);
     }
 }
