@@ -12,6 +12,12 @@
 #
 # Replicacao: todo topico tem 2 replicas (uma em cada broker) e min.insync.replicas=1,
 # entao a escrita continua funcionando com um broker fora do ar.
+#
+# Topicos internos (__consumer_offsets e transaction state log): fator de replicacao 2.
+# Com RF=1 a queda do broker que guarda os offsets do grupo faz os consumers perderem a
+# posicao (reprocessam tudo ou ficam parados). O padrao do Kafka e 3, mas RF nao pode ser
+# maior que o numero de brokers: com 2 brokers, 2 e o maximo. Para RF=3 (e min.isr=2,
+# durabilidade real) seria preciso um terceiro broker.
 
 x-kafka-common: &kafka-common
   image: apache/kafka:3.9.0
