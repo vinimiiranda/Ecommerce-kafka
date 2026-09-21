@@ -1,23 +1,26 @@
-# Cluster Kafka em modo KRaft (sem Zookeeper) com 2 brokers para alta disponibilidade.
+# Cluster Kafka em modo KRaft (sem Zookeeper) com 3 brokers para alta disponibilidade.
 # Uso: docker compose up -d
 #
 # Topologia:
 #   kafka-1  broker + controller  -> host localhost:19092
 #   kafka-2  broker + controller  -> host localhost:29092
-#   kafka-3  controller dedicado  -> desempata o quorum do KRaft
+#   kafka-4  broker               -> host localhost:39092
+#   kafka-3  controller dedicado  -> desempata o quorum do KRaft (votantes: 1, 2 e 3)
 #
-# Por que 3 nos e nao 2: o quorum KRaft precisa de maioria. Com apenas 2 votantes, a
-# queda de um deles impede eleger novos lideres de particao e o failover nao acontece.
-# Com 3 votantes o cluster tolera a queda de qualquer um dos containers.
+# Quorum KRaft: precisa de maioria. Com 3 votantes o cluster tolera a queda de qualquer
+# um dos containers de controle (kafka-1, kafka-2 ou kafka-3).
 #
-# Replicacao: todo topico tem 2 replicas (uma em cada broker) e min.insync.replicas=1,
-# entao a escrita continua funcionando com um broker fora do ar.
+# Replicacao: todo topico tem 3 replicas (uma em cada broker) e min.insync.replicas=2.
+#   - Com acks=all (padrao do kafka-clients) uma escrita so e confirmada depois de estar
+#     em pelo menos 2 brokers, entao a queda de UM broker nao perde nenhuma mensagem
+#     confirmada e as escritas continuam funcionando.
+#   - Com 2 brokers fora do ar as escritas sao RECUSADAS (o produtor recebe erro) em vez
+#     de serem aceitas sem replica. Prioriza durabilidade sobre disponibilidade.
+#   - unclean.leader.election.enable=false: uma replica desatualizada nunca vira lider
+#     (o Kafka prefere ficar indisponivel a descartar mensagens confirmadas).
 #
-# Topicos internos (__consumer_offsets e transaction state log): fator de replicacao 2.
-# Com RF=1 a queda do broker que guarda os offsets do grupo faz os consumers perderem a
-# posicao (reprocessam tudo ou ficam parados). O padrao do Kafka e 3, mas RF nao pode ser
-# maior que o numero de brokers: com 2 brokers, 2 e o maximo. Para RF=3 (e min.isr=2,
-# durabilidade real) seria preciso um terceiro broker.
+# Topicos internos (__consumer_offsets e transaction state log) tambem usam RF=3.
+# Com RF menor a queda de um broker faz consumers perderem a posicao (offsets).
 
 x-kafka-common: &kafka-common
   image: apache/kafka:3.9.0
@@ -29,11 +32,12 @@ x-kafka-common: &kafka-common
     KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
     KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
     KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-    KAFKA_DEFAULT_REPLICATION_FACTOR: 2
-    KAFKA_MIN_INSYNC_REPLICAS: 1
-    KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
-    KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 2
-    KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+    KAFKA_MIN_INSYNC_REPLICAS: 2
+    KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE: "false"
+    KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+    KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+    KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
     KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
     KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
 
@@ -92,8 +96,30 @@ services:
     volumes:
       - kafka-3-data:/var/lib/kafka/data
 
-  # Cria os topicos do projeto com 2 replicas assim que os dois brokers estao de pe.
-  # Como o auto-create exige os 2 brokers vivos, criar antes evita erro se um cair depois.
+  # Terceiro broker. Fica de fora do quorum (nao e votante); so guarda replicas dos topicos.
+  kafka-4:
+    <<: *kafka-common
+    container_name: ecommerce-kafka-4
+    hostname: kafka-4
+    ports:
+      - "39092:39092"
+    environment:
+      <<: *kafka-common-env
+      KAFKA_NODE_ID: 4
+      KAFKA_PROCESS_ROLES: broker
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:39092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-4:9092,EXTERNAL://localhost:39092
+    volumes:
+      - kafka-4-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  # Cria os topicos do projeto com 3 replicas assim que os tres brokers estao de pe.
+  # Como o auto-create exige os 3 brokers vivos, criar antes evita erro se um cair depois.
   kafka-init:
     image: apache/kafka:3.9.0
     container_name: ecommerce-kafka-init
@@ -102,17 +128,20 @@ services:
         condition: service_healthy
       kafka-2:
         condition: service_healthy
+      kafka-4:
+        condition: service_healthy
     restart: "no"
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
         for topic in ECOMMERCE_NEW_ORDER ECOMMERCE_SEND_EMAIL ECOMMERCE_ORDER_APPROVED ECOMMERCE_ORDER_REJECTED; do
-          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092,kafka-2:9092 \
-            --create --if-not-exists --topic $$topic --partitions 3 --replication-factor 2
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092,kafka-2:9092,kafka-4:9092 \
+            --create --if-not-exists --topic $$topic --partitions 3 --replication-factor 3
         done
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092,kafka-2:9092 --list
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:9092,kafka-2:9092,kafka-4:9092 --list
 
 volumes:
   kafka-1-data:
   kafka-2-data:
   kafka-3-data:
+  kafka-4-data:

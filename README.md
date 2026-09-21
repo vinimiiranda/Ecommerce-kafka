@@ -72,7 +72,7 @@ APPROVED      REJECTED
 
 ## ▶️ Como executar
 
-**Pré-requisitos:** Java 21+, Maven e Docker (para o cluster Kafka de 2 brokers, em `localhost:19092` e `localhost:29092`).
+**Pré-requisitos:** Java 21+, Maven e Docker (para o cluster Kafka de 3 brokers, em `localhost:19092`, `localhost:29092` e `localhost:39092`).
 
 ```bash
 # 1. Clonar e compilar
@@ -97,7 +97,7 @@ Os consumidores imprimem no console os eventos recebidos, com tópico, chave, pa
 
 ---
 
-## 🛡️ Alta disponibilidade (2 brokers)
+## 🛡️ Alta disponibilidade (3 brokers)
 
 O `docker-compose.yml` sobe um cluster Kafka em modo KRaft com:
 
@@ -105,12 +105,16 @@ O `docker-compose.yml` sobe um cluster Kafka em modo KRaft com:
 |---|---|---|
 | `ecommerce-kafka-1` | broker + controller | `19092` |
 | `ecommerce-kafka-2` | broker + controller | `29092` |
+| `ecommerce-kafka-4` | broker | `39092` |
 | `ecommerce-kafka-3` | controller dedicado (desempata o quórum) | — |
 
-- Todo tópico tem **2 réplicas** (uma em cada broker) e `min.insync.replicas=1`: se um broker cair, o outro assume a liderança das partições e produtores e consumidores continuam funcionando.
-- O 3º nó existe porque o quórum do KRaft precisa de maioria: com só 2 votantes, a queda de um deles impediria a eleição de novos líderes.
-- Os clientes (`KafkaDispatcher` e `KafkaService`) conectam usando os dois brokers. Para usar outro endereço, defina a variável de ambiente `KAFKA_BOOTSTRAP_SERVERS`.
-- Os tópicos do projeto são criados pelo container `ecommerce-kafka-init` com 3 partições e 2 réplicas.
+- Todo tópico tem **3 réplicas** (uma em cada broker) e `min.insync.replicas=2`. Com `acks=all` (padrão do `kafka-clients`), uma mensagem só é confirmada depois de estar em pelo menos 2 brokers: a queda de **um** broker não perde nenhuma mensagem confirmada e as escritas continuam funcionando.
+- Com **2 brokers fora do ar** (só 1 vivo) o cluster prioriza durabilidade sobre disponibilidade: as escritas são **recusadas** (o produtor recebe erro) em vez de aceitas sem réplica, e os serviços que consomem em grupo (todos os do projeto) **pausam**, pois o grupo precisa gravar seus offsets no `__consumer_offsets`, que também exige 2 réplicas. Nenhum dado é perdido e tudo retoma sozinho quando os brokers voltam.
+- `unclean.leader.election.enable=false`: uma réplica desatualizada nunca vira líder; o Kafka prefere ficar indisponível a descartar mensagens já confirmadas.
+- Os tópicos internos (`__consumer_offsets` e o log de transações) também usam fator de replicação 3, então os consumers não perdem a posição quando um broker cai.
+- O quórum do KRaft precisa de maioria, por isso há 3 votantes (`kafka-1`, `kafka-2` e `kafka-3`).
+- Os clientes (`KafkaDispatcher` e `KafkaService`) conectam usando os três brokers. Para usar outro endereço, defina a variável de ambiente `KAFKA_BOOTSTRAP_SERVERS`.
+- Os tópicos do projeto são criados pelo container `ecommerce-kafka-init` com 3 partições e 3 réplicas.
 
 Para testar o failover:
 
