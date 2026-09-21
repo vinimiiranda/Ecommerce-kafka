@@ -9,8 +9,11 @@ Em vez de serviços chamando uns aos outros diretamente, cada serviço **publica
 ## 🧭 Fluxo de eventos
 
 ```
-                          service-new-order  (Producer)
-                                   |
+      servicehttpecommerce              service-new-order
+      GET /new?email=&amount=           (linha de comando)
+                |                               |
+                +---------------+---------------+
+                                | (Producers)
                  +-----------------+------------------+
                  v                                    v
         ECOMMERCE_NEW_ORDER                 ECOMMERCE_SEND_EMAIL
@@ -38,6 +41,7 @@ APPROVED      REJECTED
 | Módulo | Papel | Tópicos |
 |---|---|---|
 | **common-kafka** | Biblioteca compartilhada: `KafkaDispatcher` (producer genérico), `KafkaService` (consumer genérico), serialização JSON com Gson e o modelo `Order` | — |
+| **servicehttpecommerce** | API HTTP (Jetty, porta 8080). `GET /new?email=&amount=` valida a entrada (400 se inválida), publica o pedido e o e-mail e responde 200; se o Kafka não confirmar em 10s responde 503 | publica em `ECOMMERCE_NEW_ORDER` e `ECOMMERCE_SEND_EMAIL` |
 | **service-new-order** | Producer. Gera pedidos e dispara o evento de pedido e o de e-mail de confirmação | publica em `ECOMMERCE_NEW_ORDER` e `ECOMMERCE_SEND_EMAIL` |
 | **fraud-detector-service** | Consumer + Producer. Avalia cada pedido e o classifica como aprovado ou fraudulento (regra: valor maior ou igual a 4500) | consome `ECOMMERCE_NEW_ORDER`, publica em `ECOMMERCE_ORDER_APPROVED` / `ECOMMERCE_ORDER_REJECTED` |
 | **service-users** | Consumer. Cadastra o cliente em um banco SQLite caso ainda não exista | consome `ECOMMERCE_NEW_ORDER` |
@@ -65,8 +69,10 @@ APPROVED      REJECTED
 | Mensageria | Apache Kafka (`kafka-clients` 4.3.1) |
 | Serialização | Gson |
 | Persistência | SQLite (JDBC) |
+| API HTTP | Jetty 11 + Servlet (Jakarta) |
+| Testes | JUnit 5 |
 | Build | Maven (projeto multi-módulo) |
-| Log | SLF4J Simple |
+| Log | SLF4J 2 Simple |
 
 ---
 
@@ -89,9 +95,22 @@ mvn -pl service-users          exec:java -Dexec.mainClass=br.com.vini.ecommerce.
 mvn -pl service-email          exec:java -Dexec.mainClass=br.com.vini.ecommerce.EmailService
 mvn -pl log-service            exec:java -Dexec.mainClass=br.com.vini.ecommerce.LogService
 
-# 4. Disparar os pedidos
-mvn -pl service-new-order exec:java -Dexec.mainClass=br.com.vini.ecommerce.NewOrderMain
+# 4. Disparar os pedidos (escolha um)
+mvn -pl service-new-order exec:java -Dexec.mainClass=br.com.vini.ecommerce.NewOrderMain   # 10 pedidos aleatórios
+mvn -pl servicehttpecommerce exec:java -Dexec.mainClass=br.com.vini.ecommerce.HttpEcommerceService
+curl "http://localhost:8080/new?email=ana@email.com&amount=250.75"                        # 1 pedido via HTTP
 ```
+
+**Testes:** `mvn test` roda os testes unitários (serialização, regra de fraude, cadastro de usuário sem duplicar e validação da API HTTP). Não precisam de Kafka.
+
+**Configuração** (variáveis de ambiente, todas opcionais):
+
+| Variável | Padrão | Uso |
+|---|---|---|
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:19092,localhost:29092,localhost:39092` | endereço do cluster |
+| `HTTP_PORT` | `8080` | porta da API HTTP |
+
+Os consumers encerram de forma limpa ao receber Ctrl+C / SIGTERM: saem do grupo na hora, sem esperar o timeout de sessão, para os outros consumers assumirem as partições. O `CreateUserService` grava em `users_database.db`, criado no diretório onde o serviço é iniciado.
 
 Os consumidores imprimem no console os eventos recebidos, com tópico, chave, partição e offset.
 
@@ -128,9 +147,9 @@ docker start ecommerce-kafka-1    # ao voltar, ele ressincroniza sozinho
 
 ## 🗺️ Próximos passos
 
-- [ ] `docker-compose.yml` subindo Kafka e todos os serviços com um comando
+- [ ] `docker-compose.yml` subindo também os serviços (hoje só o cluster Kafka)
 - [ ] Tratamento de falhas com dead letter topic
-- [ ] Testes automatizados com Testcontainers
+- [ ] Testes de integração com Testcontainers (os unitários já existem)
 - [ ] Dashboard de monitoramento dos tópicos
 
 ---

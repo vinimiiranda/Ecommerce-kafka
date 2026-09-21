@@ -95,6 +95,13 @@ services:
       KAFKA_LISTENERS: CONTROLLER://:9093
     volumes:
       - kafka-3-data:/var/lib/kafka/data
+    # Controller-only nao tem listener de broker: o healthcheck consulta o quorum KRaft.
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-metadata-quorum.sh --bootstrap-controller localhost:9093 describe --status > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
 
   # Terceiro broker. Fica de fora do quorum (nao e votante); so guarda replicas dos topicos.
   kafka-4:
