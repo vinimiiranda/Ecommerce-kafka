@@ -6,33 +6,49 @@ Em vez de serviços chamando uns aos outros diretamente, cada serviço **publica
 
 ---
 
-## 🧭 Fluxo de eventos
+## 🏗️ Arquitetura
 
-```
-      servicehttpecommerce              service-new-order
-      GET /new?email=&amount=           (linha de comando)
-                |                               |
-                +---------------+---------------+
-                                | (Producers)
-                 +-----------------+------------------+
-                 v                                    v
-        ECOMMERCE_NEW_ORDER                 ECOMMERCE_SEND_EMAIL
-                 |                                    |
-        +--------+---------+                          v
-        v                  v                   service-email
-fraud-detector-service  service-users            (Consumer)
-(Consumer + Producer)   (Consumer)
-        |                  |
-        |                  +--> grava usuario novo (SQLite)
-        v
-  +-----+------+
-  v            v
-ECOMMERCE_    ECOMMERCE_
-ORDER_        ORDER_
-APPROVED      REJECTED
+```mermaid
+flowchart TB
+    http["<b>servicehttpecommerce</b><br/>API HTTP · GET /new"]
+    cli["<b>service-new-order</b><br/>CLI · NewOrderMain"]
 
-        log-service  ->  consome o padrao ECOMMERCE.*  (todos os topicos)
+    new_order[["ECOMMERCE_NEW_ORDER"]]
+    send_email[["ECOMMERCE_SEND_EMAIL"]]
+
+    fraud["<b>fraud-detector-service</b><br/>valor ≥ 4500 é fraude"]
+    users["<b>service-users</b><br/>cadastra usuário novo"]
+    email["<b>service-email</b><br/>envia o e-mail"]
+    log["<b>log-service</b><br/>assina ECOMMERCE.*"]
+
+    approved[["ECOMMERCE_ORDER_APPROVED"]]
+    rejected[["ECOMMERCE_ORDER_REJECTED"]]
+    db[("SQLite<br/>users_database.db")]
+
+    http --> new_order
+    http --> send_email
+    cli --> new_order
+    cli --> send_email
+    new_order --> fraud
+    new_order --> users
+    send_email --> email
+    fraud --> approved
+    fraud --> rejected
+    users --> db
+    approved -.-> log
+    rejected -.-> log
+    new_order -.-> log
+    send_email -.-> log
+
+    classDef producer fill:#e8f1fb,stroke:#1f6fb2,color:#0b2540
+    classDef consumer fill:#eaf7ef,stroke:#1b8a5a,color:#0b2d1e
+    classDef topic fill:#fff4e0,stroke:#c77800,color:#3a2500
+    class http,cli producer
+    class fraud,users,email,log consumer
+    class new_order,send_email,approved,rejected topic
 ```
+
+Azul: produtores · laranja: tópicos · verde: consumers. As setas tracejadas mostram o `log-service`, que assina todos os tópicos `ECOMMERCE.*` por expressão regular. O e-mail do cliente é a chave de partição, então os pedidos de um mesmo cliente mantêm a ordem.
 
 ---
 
@@ -126,6 +142,35 @@ O `docker-compose.yml` sobe um cluster Kafka em modo KRaft com:
 | `ecommerce-kafka-2` | broker + controller | `29092` |
 | `ecommerce-kafka-4` | broker | `39092` |
 | `ecommerce-kafka-3` | controller dedicado (desempata o quórum) | — |
+
+```mermaid
+flowchart TB
+    apps["Produtores e consumers<br/><i>bootstrap: 19092, 29092, 39092</i>"]
+
+    subgraph cluster["Cluster KRaft · replication.factor 3 · min.insync.replicas 2"]
+        direction LR
+        k1["<b>kafka-1</b><br/>broker + controller<br/>:19092"]
+        k2["<b>kafka-2</b><br/>broker + controller<br/>:29092"]
+        k4["<b>kafka-4</b><br/>broker<br/>:39092"]
+        k3["<b>kafka-3</b><br/>controller dedicado<br/>(desempata o quórum)"]
+        k1 <-.->|réplicas| k2
+        k2 <-.->|réplicas| k4
+        k1 <-.->|réplicas| k4
+        k3 -.->|voto| k1
+        k3 -.->|voto| k2
+    end
+
+    apps --> cluster
+
+    classDef both fill:#e8f1fb,stroke:#1f6fb2,color:#0b2540
+    classDef broker fill:#eaf7ef,stroke:#1b8a5a,color:#0b2d1e
+    classDef ctrl fill:#fff4e0,stroke:#c77800,color:#3a2500
+    class k1,k2 both
+    class k4 broker
+    class k3 ctrl
+```
+
+Azul: broker + controller · verde: só broker · laranja: só controller. Cada partição tem uma réplica em cada broker; o quórum do KRaft tem 3 votos (`kafka-1`, `kafka-2` e `kafka-3`).
 
 - Todo tópico tem **3 réplicas** (uma em cada broker) e `min.insync.replicas=2`. Com `acks=all` (padrão do `kafka-clients`), uma mensagem só é confirmada depois de estar em pelo menos 2 brokers: a queda de **um** broker não perde nenhuma mensagem confirmada e as escritas continuam funcionando.
 - Com **2 brokers fora do ar** (só 1 vivo) o cluster prioriza durabilidade sobre disponibilidade: as escritas são **recusadas** (o produtor recebe erro) em vez de aceitas sem réplica, e os serviços que consomem em grupo (todos os do projeto) **pausam**, pois o grupo precisa gravar seus offsets no `__consumer_offsets`, que também exige 2 réplicas. Nenhum dado é perdido e tudo retoma sozinho quando os brokers voltam.
