@@ -6,6 +6,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.StringDeserializer;
 
+import java.io.IOException;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.Collections;
@@ -80,7 +81,7 @@ public class KafkaService<T> implements AutoCloseable {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             logFailure(record, e);
-        } catch (ExecutionException | SQLException e) {
+        } catch (ExecutionException | SQLException | IOException e) {
             logFailure(record, e);
         }
     }
